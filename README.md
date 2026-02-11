@@ -8,8 +8,13 @@ pinned: false
 ---
 
 # Dataset Pipeline Pro
+Dataset Pipeline Pro that converts PDFs / text into clean, chunked, training-ready datasets for BERT, LoRA, QLoRA, and semantic pair training. Includes OCR fallback, noise cleaning, chunking, multi-format dataset export, and automatic evaluation reports.
+### DIRECT LIVE LINK TEST HERE
+---
+https://huggingface.co/spaces/AI-Solutions-KK/dataset-pipeline-pro
 
-A model-agnostic NLP dataset preparation pipeline that converts raw PDFs and text documents into clean, chunked, training-ready datasets for modern LLM and embedding workflows.
+---
+
 
 The system combines a Node.js orchestration server with a Python processing engine to deliver deterministic, reproducible dataset generation with validation metrics and structured exports.
 
