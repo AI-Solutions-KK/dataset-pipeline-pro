@@ -1,3 +1,12 @@
+---
+title: Dataset Pipeline Pro
+emoji: 📚
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+pinned: false
+---
+
 # Dataset Pipeline Pro
 
 A model-agnostic NLP dataset preparation pipeline that converts raw PDFs and text documents into clean, chunked, training-ready datasets for modern LLM and embedding workflows.
