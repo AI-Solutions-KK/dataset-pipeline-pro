@@ -14,8 +14,10 @@ Dataset Pipeline Pro that converts PDFs / text into clean, chunked, training-rea
 https://huggingface.co/spaces/AI-Solutions-KK/dataset-pipeline-pro
 
 ---
+![snap](project-snaps\snap-1.png)
+![snap](project-snaps\snap-2.png)
 
-
+---
 The system combines a Node.js orchestration server with a Python processing engine to deliver deterministic, reproducible dataset generation with validation metrics and structured exports.
 
 ---
