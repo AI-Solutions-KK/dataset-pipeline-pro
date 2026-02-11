@@ -1,0 +1,5 @@
+﻿This is a comprehensive test document with substantial content. It contains multiple paragraphs to simulate real text processing. The dataset pipeline should be able to extract, clean, chunk, and export this text data.
+
+Here is another paragraph with meaningful content. This one has different information to demonstrate the text chunking capabilities. The system should segment this text appropriately based on word count and sentence boundaries. Multiple sentences should be grouped together to form meaningful chunks for machine learning applications.
+
+This third section adds even more variety to the dataset. It includes technical terminology and varied sentence structures. The text processing pipeline will clean, normalize, and prepare this content for various downstream tasks. The resulting chunks can be used for fine-tuning language models or creating training datasets.

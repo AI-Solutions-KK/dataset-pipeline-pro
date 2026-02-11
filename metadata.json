@@ -1,0 +1,5 @@
+{
+  "name": "Dataset Pipeline Pro",
+  "description": "A professional dataset engineering pipeline for PDF text extraction, cleaning, chunking, and export, mimicking a Jupyter Notebook workflow in a modern React application.",
+  "requestFramePermissions": []
+}
