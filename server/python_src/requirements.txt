@@ -22,7 +22,7 @@ pdf2image==1.16.3               # PDF to image conversion (requires Poppler)
 # OCR Dependencies
 paddleocr==2.7.0.3              # OCR engine (replaces Tesseract)
 paddlepaddle==2.6.2             # PaddlePaddle backend for OCR (updated from 2.5.2)
-opencv-python==4.8.1.78         # Required by PaddleOCR
+opencv-python==4.6.0.66         # Required by PaddleOCR
 shapely==2.0.2                  # Required by PaddleOCR
 
 # NLP & Text Processing
