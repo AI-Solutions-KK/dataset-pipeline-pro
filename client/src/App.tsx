@@ -11,11 +11,16 @@ import VerificationReport from './components/VerificationReport';
 import { PipelineStage, LogEntry, DatasetChunk } from './types';
 import * as PipelineLogic from './logic/pipelineLogic';
 
+// API base for fetches (env-safe)
+const API = (import.meta as any).env?.VITE_API_BASE || '';
+
 const App: React.FC = () => {
   const [stage, setStage] = useState<PipelineStage>(PipelineStage.INIT);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [fileName, setFileName] = useState<string>('');
   const [filePath, setFilePath] = useState<string>('');
+  const [uploadInProgress, setUploadInProgress] = useState<boolean>(false);
+  const [uploadComplete, setUploadComplete] = useState<boolean>(false);
   const [chunks, setChunks] = useState<DatasetChunk[]>([]);
   const [generatedFiles, setGeneratedFiles] = useState<Record<string, any>>({});
   const [selectedExport, setSelectedExport] = useState<string>('train.json');
@@ -54,35 +59,56 @@ const App: React.FC = () => {
       // Browser: We'll need to upload to a server first
       // For now, store the file object
       setFilePath(file.name);
+      setUploadInProgress(true);
+      setUploadComplete(false);
       addLog(`[INFO] File selected: ${file.name} (uploading to server...)`, 'info');
-      
-      // Upload file to backend server
-      uploadFileToServer(file);
+
+      // Upload file to backend server and await completion
+      uploadFileToServer(file).then(success => {
+        setUploadInProgress(false);
+        setUploadComplete(!!success);
+      });
     }
   };
 
   /**
    * Upload file to Node.js backend (for browser mode)
    */
-  const uploadFileToServer = async (file: File) => {
+  const uploadFileToServer = async (file: File): Promise<boolean> => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
-      const response = await fetch('/api/upload', {
+
+      const response = await fetch(`${API}/api/upload`, {
         method: 'POST',
         body: formData,
       });
-      
+
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        let errText = `Status ${response.status}`;
+        try { errText = await response.text(); } catch {}
+        addLog(`[ERROR] Upload failed: ${errText}`, 'error');
+        return false;
       }
-      
-      const data = await response.json();
-      setFilePath(data.filePath);
-      addLog(`[OK] File uploaded: ${data.filePath}`, 'success');
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch (err) {
+        addLog('[WARN] Upload returned non-JSON response', 'warning');
+      }
+
+      if (data && data.filePath) {
+        setFilePath(data.filePath);
+        addLog(`[OK] File uploaded: ${data.filePath}`, 'success');
+        return true;
+      }
+
+      addLog('[OK] Upload completed', 'success');
+      return true;
     } catch (error) {
-      addLog(`[ERROR] Upload failed: ${error}`, 'error');
+      addLog(`[ERROR] Upload failed: ${String(error)}`, 'error');
+      return false;
     }
   };
 
@@ -95,56 +121,63 @@ const App: React.FC = () => {
       addLog('[ERROR] No file selected', 'error');
       return;
     }
-    
+
+    // Prevent double runs
+    if (isProcessing) return;
+
     setIsProcessing(true);
     addLog('[START] Starting Python Pipeline Engine...', 'info');
     addLog('='.repeat(60), 'info');
-    
+
     try {
-      // Execute Python pipeline and get real-time logs
-      const success = await PipelineLogic.executePythonPipeline(
-        filePath,
-        (message, type) => addLog(message, type)
-      );
-      
-      if (success) {
-        addLog('='.repeat(60), 'info');
-        addLog('[OK] Pipeline execution complete!', 'success');
-        
-        // Load generated datasets
-        addLog('[INFO] Loading generated datasets...', 'info');
-        try {
-          const files = await PipelineLogic.loadGeneratedDatasets();
+      const success = await PipelineLogic.executePythonPipeline(filePath, (m, t) => addLog(m, t));
+
+      if (!success) {
+        addLog('[ERROR] Pipeline execution failed', 'error');
+        return;
+      }
+
+      addLog('='.repeat(60), 'info');
+      addLog('[OK] Pipeline execution complete!', 'success');
+
+      // Load generated datasets
+      addLog('[INFO] Loading generated datasets...', 'info');
+      try {
+        const files = await PipelineLogic.loadGeneratedDatasets();
+        if (files && typeof files === 'object') {
           setGeneratedFiles(files);
-          
-          // Load chunks for display
-          if (files['chunks_with_id.json']) {
+
+          if (files['chunks_with_id.json'] && Array.isArray(files['chunks_with_id.json'])) {
             setChunks(files['chunks_with_id.json']);
             addLog(`[OK] Loaded ${files['chunks_with_id.json'].length} chunks`, 'success');
+          } else {
+            addLog('[WARN] No chunks found in output', 'warning');
           }
-        } catch (loadError) {
-          addLog(`[WARN] Could not load datasets: ${loadError}`, 'warning');
+        } else {
+          addLog('[WARN] No generated files were returned', 'warning');
         }
-        
-        // Load evaluation report
-        try {
-          const evalReport = await PipelineLogic.loadEvaluationReport();
-          if (evalReport) {
-            setReport(evalReport);
-            addLog('[OK] Loaded evaluation report', 'success');
-          }
-        } catch (reportError) {
-          addLog(`[WARN] Could not load report: ${reportError}`, 'warning');
-        }
-        
-        // Update stage to exported
-        setStage(PipelineStage.EXPORTED);
-        addLog('[OK] All datasets ready for export!', 'success');
-      } else {
-        addLog('[ERROR] Pipeline execution failed', 'error');
+      } catch (loadError) {
+        addLog(`[WARN] Could not load datasets: ${String(loadError)}`, 'warning');
       }
+
+      // Load evaluation report
+      try {
+        const evalReport = await PipelineLogic.loadEvaluationReport();
+        if (evalReport && typeof evalReport === 'object') {
+          setReport(evalReport);
+          addLog('[OK] Loaded evaluation report', 'success');
+        } else {
+          addLog('[INFO] No evaluation report produced', 'info');
+        }
+      } catch (reportError) {
+        addLog(`[WARN] Could not load report: ${String(reportError)}`, 'warning');
+      }
+
+      // Update stage to exported
+      setStage(PipelineStage.EXPORTED);
+      addLog('[OK] All datasets ready for export!', 'success');
     } catch (error) {
-      addLog(`[ERROR] Pipeline error: ${error}`, 'error');
+      addLog(`[ERROR] Pipeline error: ${String(error)}`, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -174,13 +207,14 @@ const App: React.FC = () => {
     try {
       addLog('[CLEAN] Clearing all generated files...', 'info');
 
-      const res = await fetch('/api/clean-all', {
-        method: 'DELETE'
-      });
+      // Use POST for clean-all for wider compatibility with some hosts
+      const res = await fetch(`${API}/api/clean-all`, { method: 'POST' });
 
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || 'Clean failed');
+      if (!res.ok) {
+        let txt = `Status ${res.status}`;
+        try { txt = await res.text(); } catch {}
+        throw new Error(txt || 'Clean failed');
+      }
 
       // reset UI state
       setChunks([]);
@@ -202,17 +236,21 @@ const App: React.FC = () => {
    * Get statistics from chunks or report
    */
   const evalStats = useMemo(() => {
-    if (report) {
+    if (report && typeof report === 'object') {
+      const total = report.total_chunks ?? null;
+      const wordStats = report.word_stats ?? null;
       return {
-        total: report.total_chunks,
+        total: total ?? (Array.isArray(chunks) ? chunks.length : 0),
         words: {
-          min: report.word_stats.min,
-          max: report.word_stats.max,
-          avg: report.word_stats.mean
+          min: wordStats?.min ?? 0,
+          max: wordStats?.max ?? 0,
+          avg: wordStats?.mean ?? 0
         }
       };
     }
-    return PipelineLogic.getStats(chunks.map(c => c.text));
+
+    const texts = Array.isArray(chunks) ? chunks.map(c => c.text || '') : [];
+    return PipelineLogic.getStats(texts) ?? { total: 0, words: { min: 0, max: 0, avg: 0 } };
   }, [chunks, report]);
 
   return (
@@ -220,8 +258,8 @@ const App: React.FC = () => {
       <Sidebar 
         currentStage={stage} 
         stats={{ 
-          totalChunks: chunks.length, 
-          wordCount: chunks.reduce((acc, curr) => acc + curr.word_count, 0)
+          totalChunks: Array.isArray(chunks) ? chunks.length : 0, 
+          wordCount: (Array.isArray(chunks) ? chunks : []).reduce((acc, curr) => acc + (curr?.word_count || 0), 0)
         }} 
       />
 
@@ -305,7 +343,7 @@ const App: React.FC = () => {
                       {filePath && (
                         <button 
                           onClick={runCompletePipeline}
-                          disabled={isProcessing}
+                          disabled={isProcessing || (!uploadComplete && !window.__TAURI__)}
                           className="px-10 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black transition-all flex items-center gap-3 shadow-2xl shadow-indigo-600/30 active:scale-95 disabled:opacity-50"
                         >
                           {isProcessing ? 'Processing...' : 'Process Document'} <ArrowRight size={18} />
@@ -345,7 +383,7 @@ const App: React.FC = () => {
                               <option value="clean_text.txt">clean_text.txt - Cleaned & normalized text</option>
                             </optgroup>
                             <optgroup label="Generated Datasets">
-                              {Object.keys(generatedFiles)
+                              {Object.keys(generatedFiles ?? {})
                                 .filter(f => !['raw_text.txt', 'clean_text.txt'].includes(f))
                                 .map(f => (
                                   <option key={f} value={f}>{f}</option>

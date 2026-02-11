@@ -51,6 +51,48 @@ const storage = multer.diskStorage({
   }
 });
 
+// Also accept POST for clean-all (some hosting environments prefer POST)
+app.post('/api/clean-all', async (req, res) => {
+  try {
+    const CLEAN_DIRS = [
+      'uploads',
+      'data',
+      'datasets',
+      'outputs',
+      'cache'
+    ];
+
+    for (const dir of CLEAN_DIRS) {
+      const full = path.join(__dirname, dir);
+
+      try {
+        const files = await fs.readdir(full);
+        for (const f of files) {
+          await fs.rm(path.join(full, f), {
+            recursive: true,
+            force: true
+          });
+        }
+        console.log(`[CLEAN] Cleared ${dir}/`);
+      } catch {
+        // ignore missing dirs
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: 'All generated files cleared'
+    });
+
+  } catch (err) {
+    console.error('[CLEAN ERROR]', err);
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
 const upload = multer({ storage });
 
 // ============================================================================

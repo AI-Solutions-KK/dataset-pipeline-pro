@@ -8,6 +8,9 @@
 
 import { DatasetChunk, DatasetReport } from '../types';
 
+// API base (env-safe). If empty, use same origin.
+const API = (import.meta as any).env?.VITE_API_BASE || '';
+
 // ============================================================================
 // PYTHON BACKEND COMMUNICATION
 // ============================================================================
@@ -76,59 +79,86 @@ async function executeFetchPipeline(
   filePath: string,
   onLog: (message: string, type: 'info' | 'success' | 'error' | 'warning') => void
 ): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutMs = 2 * 60 * 1000; // 2 minutes
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     onLog('[INFO] Connecting to backend server...', 'info');
-    
-    const response = await fetch('/api/run-pipeline', {
+
+    const response = await fetch(`${API}/api/run-pipeline`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filePath }),
+      signal: controller.signal,
     });
-    
-    // Check if response is OK
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: response.statusText }));
-      onLog(`[ERROR] Server returned status ${response.status}: ${errorData.error || 'Unknown error'}`, 'error');
+      let errText = response.statusText || `Status ${response.status}`;
+      try {
+        const txt = await response.text();
+        if (txt) errText = txt;
+      } catch {}
+      onLog(`[ERROR] Server returned: ${errText}`, 'error');
       return false;
     }
-    
-    const reader = response.body?.getReader();
+
+    // If streaming is not supported, fallback to whole text
+    if (!response.body || !response.body.getReader) {
+      try {
+        const text = await response.text();
+        if (text) onLog(text, 'info');
+        return response.ok;
+      } catch (err) {
+        onLog(`[ERROR] Failed to read response: ${String(err)}`, 'error');
+        return false;
+      }
+    }
+
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    
-    if (!reader) {
-      onLog('[ERROR] No response body from server', 'error');
-      return false;
-    }
-    
     onLog('[INFO] Backend connected, running pipeline...', 'info');
-    
+
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        onLog(`[ERROR] Stream read failed: ${String(err)}`, 'error');
+        return false;
+      }
+
+      const { done, value } = chunk as any;
       if (done) break;
-      
-      const text = decoder.decode(value);
-      const lines = text.split('\n');
-      
-      for (const line of lines) {
-        if (line.trim()) {
+
+      try {
+        const text = decoder.decode(value, { stream: true });
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (!line) continue;
           if (line.startsWith('LOG:')) {
             const message = line.substring(5).trim();
             const type = detectLogType(message);
             onLog(message, type);
           } else {
-            // Log non-LOG output as info
             onLog(line, 'info');
           }
         }
+      } catch (err) {
+        onLog(`[ERROR] Failed to decode stream chunk: ${String(err)}`, 'error');
       }
     }
-    
+
     return true;
-  } catch (error) {
-    onLog(`[ERROR] Network error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError') {
+      onLog('[ERROR] Request timed out', 'error');
+    } else {
+      onLog(`[ERROR] Network error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
     return false;
+  } finally {
+    try { clearTimeout(timeoutId); } catch {}
   }
 }
 
@@ -174,9 +204,26 @@ export async function loadGeneratedDatasets(): Promise<Record<string, any>> {
         }
       }
     } else {
-      // For HTTP API: Fetch from backend
-      const response = await fetch('/api/datasets');
-      files = await response.json();
+      // For HTTP API: Fetch from backend (env-safe)
+      try {
+        const response = await fetch(`${API}/api/datasets`);
+        if (!response.ok) {
+          return {};
+        }
+
+        const text = await response.text().catch(() => '');
+        if (!text) return {};
+
+        try {
+          files = JSON.parse(text);
+        } catch (err) {
+          // If backend returned plain text, keep it under a key
+          files = { 'raw_output.txt': text } as any;
+        }
+      } catch (err) {
+        console.error('Error fetching datasets:', err);
+        return {};
+      }
     }
     
     return files;
@@ -199,8 +246,20 @@ export async function loadEvaluationReport(): Promise<DatasetReport | null> {
       const content = await readTextFile(reportPath);
       return JSON.parse(content);
     } else {
-      const response = await fetch('/api/report');
-      return await response.json();
+      try {
+        const response = await fetch(`${API}/api/report`);
+        if (!response.ok) return null;
+        const text = await response.text().catch(() => '');
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch (err) {
+          return null;
+        }
+      } catch (err) {
+        console.error('Error fetching report:', err);
+        return null;
+      }
     }
   } catch (error) {
     console.error('Error loading report:', error);
